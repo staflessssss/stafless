@@ -342,6 +342,53 @@ function injectCredentialsIntoNodes(
   });
 }
 
+function hasActiveCredential(
+  integrations: IntegrationSnapshot[],
+  type: IntegrationType
+) {
+  const integration = buildIntegrationMap(integrations).get(type);
+  return Boolean(
+    integration &&
+      integration.status === "ACTIVE" &&
+      parseCredentialRef(integration)
+  );
+}
+
+function stripOptionalNodes(input: {
+  workflowKey: string;
+  nodes: unknown[];
+  connections: Record<string, unknown>;
+  integrations: IntegrationSnapshot[];
+}) {
+  if (
+    input.workflowKey === "book_call" &&
+    !hasActiveCredential(input.integrations, IntegrationType.TELEGRAM)
+  ) {
+    const nodes = input.nodes.filter((node) => {
+      if (!node || typeof node !== "object") {
+        return true;
+      }
+
+      return (node as { name?: string }).name !== "Send Telegram";
+    });
+
+    return {
+      nodes,
+      connections: {
+        ...input.connections,
+        "Create Calendar Event": {
+          main: [[{ node: "Log to Sheets", type: "main", index: 0 }]]
+        }
+      }
+    };
+  }
+
+  return {
+    nodes: input.nodes,
+    connections: input.connections
+  };
+}
+
 export async function listN8nWorkflows() {
   const response = await n8nFetch<N8nWorkflowListResponse>(
     "/workflows?limit=10"
@@ -442,6 +489,12 @@ export async function provisionWorkflowBinding(
       builtTemplate.connections,
       replacements
     ) as Record<string, unknown>;
+    const strippedTemplate = stripOptionalNodes({
+      workflowKey: input.workflowKey,
+      nodes: hydratedNodes,
+      connections: hydratedConnections,
+      integrations: input.integrations ?? []
+    });
     const hydratedSettings = replacePlaceholdersInValue(
       builtTemplate.settings ?? {},
       replacements
@@ -453,10 +506,19 @@ export async function provisionWorkflowBinding(
 
     const created = await createN8nWorkflow({
       name: `${input.tenantSlug ?? input.tenantId} :: ${input.agentName ?? input.agentId} :: ${input.workflowKey}`,
-      nodes: hydratedNodes,
-      connections: hydratedConnections,
+      nodes: strippedTemplate.nodes,
+      connections: strippedTemplate.connections,
       settings: hydratedSettings
     });
+
+    const webhookSuffix =
+      input.workflowKey === "handle_incoming_message"
+        ? "core-message"
+        : input.workflowKey === "check_availability"
+          ? "check-availability"
+          : input.workflowKey === "check_calendar"
+            ? "check-calendar"
+            : "book-call";
 
     return {
       workflowKey: input.workflowKey,
@@ -464,19 +526,13 @@ export async function provisionWorkflowBinding(
       status:
         missingIntegrations.length > 0
           ? `provisioned_missing_integrations:${missingIntegrations.join(",")}`
-          : input.workflowKey === "handle_incoming_message"
-            ? "provisioned_needs_connect"
-            : `provisioned_webhook:${webhookPath(
+          : `provisioned_webhook:${webhookPath(
                 {
                   tenantSlug: input.tenantSlug ?? input.tenantId,
                   workflowKey: input.workflowKey,
                   n8nBaseUrl: env.N8N_BASE_URL
                 },
-                input.workflowKey === "check_availability"
-                  ? "check-availability"
-                  : input.workflowKey === "check_calendar"
-                    ? "check-calendar"
-                    : "book-call"
+                webhookSuffix
               )}`
     };
   }

@@ -175,11 +175,7 @@ export function requiredIntegrationsForWorkflow(workflowKey: string) {
     case "check_calendar":
       return [IntegrationType.GOOGLE_CALENDAR];
     case "book_call":
-      return [
-        IntegrationType.GOOGLE_CALENDAR,
-        IntegrationType.GOOGLE_SHEETS,
-        IntegrationType.TELEGRAM
-      ];
+      return [IntegrationType.GOOGLE_CALENDAR, IntegrationType.GOOGLE_SHEETS];
     case "send_reply":
       return [IntegrationType.GMAIL];
     default:
