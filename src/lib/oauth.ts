@@ -283,11 +283,6 @@ async function createGoogleCredential(input: {
       data: {
         clientId: env.GOOGLE_CLIENT_ID,
         clientSecret: env.GOOGLE_CLIENT_SECRET,
-        accessToken: input.tokens.access_token,
-        refreshToken: input.tokens.refresh_token ?? "",
-        tokenType: input.tokens.token_type ?? "Bearer",
-        expiresIn,
-        scope: input.tokens.scope ?? GOOGLE_SCOPES,
         oauthTokenData: {
           access_token: input.tokens.access_token,
           refresh_token: input.tokens.refresh_token ?? "",

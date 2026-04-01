@@ -72,12 +72,17 @@ export async function GET(
         connected: result.integration.type.toLowerCase()
       })
     );
-  } catch {
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : "We could not finish connecting that account. Please try again.";
+
     return buildRedirect(
       request,
       resolvedState.tenantSlug,
       new URLSearchParams({
-        error: "We could not finish connecting that account. Please try again."
+        error: message
       })
     );
   }
