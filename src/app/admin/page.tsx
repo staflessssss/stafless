@@ -4,6 +4,8 @@ import { getDashboardTenants } from "@/lib/dashboard";
 import { CreateAgentForm, CreateTenantForm } from "./admin-actions";
 import { db } from "@/lib/db";
 
+export const dynamic = "force-dynamic";
+
 function statCard(label: string, value: string | number) {
   return (
     <div

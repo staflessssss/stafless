@@ -187,6 +187,10 @@ export function CreateAgentForm({
             <p style={{ margin: 0, fontWeight: 700 }}>
               Required services for {selectedTemplate.name}
             </p>
+            <p style={{ margin: 0, color: "var(--muted)", lineHeight: 1.6 }}>
+              Google Workspace is treated as one client connection and covers Gmail,
+              Calendar, Drive, and Sheets together.
+            </p>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               {creationCheck.requiredIntegrationTypes.map((integrationType) => {
                 const isConnected = creationCheck.connectedIntegrationTypes.includes(
