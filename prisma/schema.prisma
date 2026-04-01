@@ -1,0 +1,239 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum RecordStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  DISABLED
+}
+
+enum IntegrationType {
+  GMAIL
+  INSTAGRAM
+  GOOGLE_CALENDAR
+  GOOGLE_SHEETS
+  GOOGLE_DRIVE
+  TELEGRAM
+}
+
+model Tenant {
+  id               String            @id @default(cuid())
+  name             String
+  slug             String            @unique
+  timezone         String
+  status           RecordStatus      @default(DRAFT)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  agents           Agent[]
+  integrations     Integration[]
+  conversations    Conversation[]
+  leads            Lead[]
+  appointments     Appointment[]
+  workflowBindings WorkflowBinding[]
+  users            TenantUser[]
+}
+
+model TenantUser {
+  id           String          @id @default(cuid())
+  tenantId     String
+  email        String          @unique
+  fullName     String?
+  passwordHash String
+  status       RecordStatus    @default(ACTIVE)
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+  tenant       Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  sessions     ClientSession[]
+
+  @@index([tenantId])
+}
+
+model ClientSession {
+  id           String       @id @default(cuid())
+  userId       String
+  sessionToken String       @unique
+  expiresAt    DateTime
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  user         TenantUser   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model AgentTemplate {
+  id              String   @id @default(cuid())
+  name            String
+  slug            String   @unique
+  niche           String
+  basePrompt      String
+  defaultTools    Json
+  defaultChannels Json
+  workflowTemplateMap Json?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  agents          Agent[]
+}
+
+model Agent {
+  id           String       @id @default(cuid())
+  tenantId     String
+  templateId   String
+  name         String
+  status       RecordStatus @default(DRAFT)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  tenant       Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  template     AgentTemplate @relation(fields: [templateId], references: [id], onDelete: Restrict)
+  config       AgentConfig?
+  toolConfigs  ToolConfig[]
+  workflows    WorkflowBinding[]
+
+  @@unique([tenantId, name])
+}
+
+model AgentConfig {
+  id             String   @id @default(cuid())
+  agentId        String   @unique
+  businessName   String
+  ownerName      String
+  website        String
+  contactEmail   String
+  signature      String
+  brandVoice     Json
+  businessRules  Json
+  coverageRules  Json
+  pricing        Json
+  faq            Json
+  portfolioLinks Json
+  reviewsLink    String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  agent          Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+}
+
+model Integration {
+  id            String          @id @default(cuid())
+  tenantId      String
+  type          IntegrationType
+  status        RecordStatus    @default(DRAFT)
+  accountLabel  String?
+  credentialRef String?
+  connectedAt   DateTime?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  tenant        Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, type])
+}
+
+model ToolConfig {
+  id        String   @id @default(cuid())
+  agentId    String
+  toolName   String
+  enabled    Boolean @default(true)
+  config     Json
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  agent      Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@unique([agentId, toolName])
+}
+
+model Conversation {
+  id               String      @id @default(cuid())
+  tenantId         String
+  channel          String
+  externalThreadId String
+  customerEmail    String?
+  status           RecordStatus @default(ACTIVE)
+  lastMessageAt    DateTime?
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+  tenant           Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  messages         Message[]
+  toolRuns         ToolRun[]
+  lead             Lead?
+
+  @@unique([tenantId, channel, externalThreadId])
+}
+
+model Message {
+  id             String      @id @default(cuid())
+  conversationId String
+  direction      String
+  senderType     String
+  rawText        String?
+  normalizedText String?
+  modelOutput    String?
+  sentAt         DateTime?
+  createdAt      DateTime    @default(now())
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+}
+
+model ToolRun {
+  id             String       @id @default(cuid())
+  conversationId String
+  toolName       String
+  requestJson    Json
+  responseJson   Json?
+  status         RecordStatus @default(ACTIVE)
+  createdAt      DateTime     @default(now())
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+}
+
+model Lead {
+  id             String       @id @default(cuid())
+  tenantId       String
+  conversationId String?      @unique
+  name           String?
+  email          String?
+  source         String?
+  stage          String?
+  weddingDate    DateTime?
+  location       String?
+  metadata       Json?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  tenant         Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  conversation   Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  appointments   Appointment[]
+}
+
+model Appointment {
+  id              String       @id @default(cuid())
+  tenantId        String
+  leadId          String
+  startAt         DateTime
+  endAt           DateTime
+  externalEventId String?
+  status          RecordStatus @default(ACTIVE)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  tenant          Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  lead            Lead         @relation(fields: [leadId], references: [id], onDelete: Cascade)
+}
+
+model WorkflowBinding {
+  id            String       @id @default(cuid())
+  tenantId      String
+  agentId       String
+  workflowKey   String
+  n8nWorkflowId String?
+  status        String
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  tenant        Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  agent         Agent        @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@unique([agentId, workflowKey])
+  @@index([tenantId, workflowKey])
+}
