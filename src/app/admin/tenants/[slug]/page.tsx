@@ -58,6 +58,20 @@ function inferAgentChannel(workflowKeys: string[]): AgentChannel {
   return workflowKeys.includes("instagram_adapter") ? "instagram" : "gmail";
 }
 
+function getCredentialSyncState(credentialRef: string | null) {
+  if (!credentialRef) {
+    return "missing";
+  }
+
+  const parts = credentialRef.split(":");
+
+  if (parts.length >= 3 && parts[1]) {
+    return "synced";
+  }
+
+  return "fallback";
+}
+
 export default async function TenantDetailPage({
   params
 }: {
@@ -389,6 +403,16 @@ export default async function TenantDetailPage({
                     <p style={{ margin: "6px 0 0", color: "var(--muted)" }}>
                       Status: {integration.status}
                     </p>
+                    <p style={{ margin: 0, color: "var(--muted)" }}>
+                      Connected account: {integration.accountLabel ?? "No account connected yet"}
+                    </p>
+                    {integration.status === "ACTIVE" &&
+                    getCredentialSyncState(integration.credentialRef) === "fallback" ? (
+                      <p style={{ margin: 0, color: "#8a2f2f", fontSize: 13 }}>
+                        n8n credential sync is incomplete: saved fallback reference has no n8n
+                        credential ID yet.
+                      </p>
+                    ) : null}
                     <p style={{ margin: 0, color: "var(--muted)" }}>
                       {integration.connectMode === "self_serve"
                         ? "The client connects this in their dashboard. Those credentials are reused when you create the matching channel agent."

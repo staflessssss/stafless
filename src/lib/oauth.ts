@@ -51,6 +51,12 @@ type OAuthConnectResult = {
   integrations: ConnectedIntegrationResult[];
 };
 
+type GoogleIntegrationType =
+  | "GMAIL"
+  | "GOOGLE_CALENDAR"
+  | "GOOGLE_SHEETS"
+  | "GOOGLE_DRIVE";
+
 function getOAuthSecret() {
   return env.OAUTH_STATE_SECRET ?? env.DATABASE_URL;
 }
@@ -244,7 +250,7 @@ async function createGoogleCredential(input: {
   };
 }) {
   if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET || !env.N8N_BASE_URL || !env.N8N_API_KEY) {
-    return null;
+    throw new Error("Google credential sync is not configured for n8n.");
   }
 
   const credentialType =
@@ -292,10 +298,74 @@ async function createGoogleCredential(input: {
       }
     });
 
-    return `${credentialType}:${credential.data.id}:${credentialName}`;
-  } catch {
-    return null;
+    return `${credentialType}:${credential.id}:${credentialName}`;
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Unknown error creating n8n credential.";
+
+    console.error("[oauth] Failed to create Google credential in n8n", {
+      tenantSlug: input.tenantSlug,
+      integrationType: input.integrationType,
+      email: input.email,
+      credentialType,
+      credentialName,
+      message
+    });
+
+    throw new Error(
+      `Failed to create ${getIntegrationLabel(input.integrationType)} credential in n8n: ${message}`
+    );
   }
+}
+
+async function createGoogleCredentialRefs(input: {
+  tenantSlug: string;
+  email: string;
+  tokens: {
+    access_token: string;
+    refresh_token?: string;
+    scope?: string;
+    token_type?: string;
+    expires_in?: number;
+  };
+}) {
+  const googleIntegrationTypes: GoogleIntegrationType[] = [
+    IntegrationType.GMAIL,
+    IntegrationType.GOOGLE_CALENDAR,
+    IntegrationType.GOOGLE_SHEETS,
+    IntegrationType.GOOGLE_DRIVE
+  ];
+
+  const settledCredentials = await Promise.allSettled(
+    googleIntegrationTypes.map(async (integrationType) => ({
+      integrationType,
+      credentialRef: await createGoogleCredential({
+        tenantSlug: input.tenantSlug,
+        integrationType,
+        email: input.email,
+        tokens: input.tokens
+      })
+    }))
+  );
+
+  const failedCredentials = settledCredentials
+    .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+    .map((result) => result.reason);
+
+  if (failedCredentials.length > 0) {
+    const firstFailure = failedCredentials[0];
+    const message =
+      firstFailure instanceof Error ? firstFailure.message : "Unknown error creating n8n credentials.";
+
+    throw new Error(message);
+  }
+
+  return settledCredentials
+    .filter((result): result is PromiseFulfilledResult<{
+      integrationType: GoogleIntegrationType;
+      credentialRef: string;
+    }> => result.status === "fulfilled")
+    .map((result) => result.value);
 }
 
 async function connectGoogleWorkspace(
@@ -321,31 +391,11 @@ async function connectGoogleWorkspace(
   );
   const accountLabel = profile.email || profile.name || "Connected Gmail";
   const connectedAt = new Date();
-  const googleIntegrationTypes = [
-    IntegrationType.GMAIL,
-    IntegrationType.GOOGLE_CALENDAR,
-    IntegrationType.GOOGLE_SHEETS,
-    IntegrationType.GOOGLE_DRIVE
-  ];
-  const credentialRefs = await Promise.all(
-    googleIntegrationTypes.map(async (integrationType) => ({
-      integrationType,
-      credentialRef:
-        (await createGoogleCredential({
-          tenantSlug: state.tenantSlug,
-          integrationType,
-          email: profile.email,
-          tokens: token
-        })) ??
-        `${integrationType === IntegrationType.GMAIL
-          ? "gmailOAuth2"
-          : integrationType === IntegrationType.GOOGLE_CALENDAR
-            ? "googleCalendarOAuth2Api"
-            : integrationType === IntegrationType.GOOGLE_SHEETS
-              ? "googleSheetsOAuth2Api"
-              : "googleDriveOAuth2Api"}:${profile.email}`
-    }))
-  );
+  const credentialRefs = await createGoogleCredentialRefs({
+    tenantSlug: state.tenantSlug,
+    email: profile.email,
+    tokens: token
+  });
 
   return {
     integrations: credentialRefs.map((item) => ({

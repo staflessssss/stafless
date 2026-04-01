@@ -36,10 +36,15 @@ type N8nWorkflowListResponse = {
 };
 
 type N8nCredentialResponse = {
-  data: {
-    id: string;
-    name: string;
-    type: string;
+  id?: string;
+  name?: string;
+  type?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  data?: {
+    id?: string;
+    name?: string;
+    type?: string;
     createdAt?: string;
     updatedAt?: string;
   };
@@ -102,14 +107,6 @@ function getN8nApiBase() {
   }
 
   return `${env.N8N_BASE_URL.replace(/\/$/, "")}/api/v1`;
-}
-
-function getN8nEditorBase() {
-  if (!env.N8N_BASE_URL) {
-    throw new Error("N8N_BASE_URL is not configured.");
-  }
-
-  return `${env.N8N_BASE_URL.replace(/\/$/, "")}/rest`;
 }
 
 async function n8nFetchAbsolute<T>(url: string, init?: RequestInit): Promise<T> {
@@ -180,10 +177,6 @@ async function n8nFetchViaPowerShell<T>(
 
 async function n8nFetch<T>(path: string, init?: RequestInit): Promise<T> {
   return n8nFetchAbsolute<T>(`${getN8nApiBase()}${path}`, init);
-}
-
-async function n8nEditorFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  return n8nFetchAbsolute<T>(`${getN8nEditorBase()}${path}`, init);
 }
 
 function escapePowerShell(value: string) {
@@ -444,7 +437,7 @@ export async function createN8nCredential(input: {
   }>;
   data: Record<string, unknown>;
 }) {
-  return n8nEditorFetch<N8nCredentialResponse>("/credentials", {
+  const credential = await n8nFetch<N8nCredentialResponse>("/credentials", {
     method: "POST",
     body: JSON.stringify({
       name: input.name,
@@ -453,6 +446,19 @@ export async function createN8nCredential(input: {
       data: input.data
     })
   });
+
+  const resolvedId = credential.id ?? credential.data?.id;
+
+  if (!resolvedId) {
+    throw new Error("n8n credential created without an ID in the API response.");
+  }
+
+  return {
+    ...credential,
+    id: resolvedId,
+    name: credential.name ?? credential.data?.name ?? input.name,
+    type: credential.type ?? credential.data?.type ?? input.type
+  };
 }
 
 export async function provisionWorkflowBinding(
