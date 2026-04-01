@@ -62,7 +62,6 @@ export async function PATCH(
 
       const launchCheck = getAgentLaunchCheck({
         status: agentForLaunchCheck.status,
-        template: agentForLaunchCheck.template,
         config: agentForLaunchCheck.config,
         integrations: agentForLaunchCheck.tenant.integrations,
         workflows: agentForLaunchCheck.workflows

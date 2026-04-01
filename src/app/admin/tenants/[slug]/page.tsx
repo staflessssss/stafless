@@ -1,5 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import {
+  getAgentChannelLabel,
+  getDefaultAgentName,
+  getSupportedAgentChannels,
+  type AgentChannel
+} from "@/lib/agent-channels";
 import { getAgentCreationCheck } from "@/lib/agent-creation-check";
 import { getAgentLaunchCheck } from "@/lib/agent-launch-check";
 import { getTenantBySlug } from "@/lib/dashboard";
@@ -48,6 +54,10 @@ function keyValue(label: string, value: React.ReactNode) {
   );
 }
 
+function inferAgentChannel(workflowKeys: string[]): AgentChannel {
+  return workflowKeys.includes("instagram_adapter") ? "instagram" : "gmail";
+}
+
 export default async function TenantDetailPage({
   params
 }: {
@@ -67,22 +77,25 @@ export default async function TenantDetailPage({
     notFound();
   }
 
-  const agent = tenant.agents[0];
-  const config = agent?.config;
-  const selectedTemplate = agent?.template ?? templates[0] ?? null;
-  const creationCheck = selectedTemplate
-    ? getAgentCreationCheck(selectedTemplate.slug, tenant.integrations)
-    : null;
-  const launchCheck =
-    agent
-      ? getAgentLaunchCheck({
-          status: agent.status,
-          template: agent.template,
-          config: agent.config,
-          integrations: tenant.integrations,
-          workflows: agent.workflows
+  const selectedTemplate = templates[0] ?? null;
+  const channelChecks =
+    selectedTemplate
+      ? getSupportedAgentChannels(selectedTemplate.slug).map((channel) => {
+          const check = getAgentCreationCheck(
+            selectedTemplate.slug,
+            tenant.integrations,
+            channel
+          );
+
+          return {
+            value: channel,
+            label: getAgentChannelLabel(channel),
+            canCreate: check.canCreateAgent,
+            missingLabels: check.missingIntegrationLabels,
+            suggestedName: getDefaultAgentName(channel, tenant.name)
+          };
         })
-      : null;
+      : [];
   const visibleIntegrationTypes = selectedTemplate
     ? getVisibleIntegrationTypes(
         selectedTemplate.slug,
@@ -98,7 +111,6 @@ export default async function TenantDetailPage({
       status: integration?.status ?? "DRAFT",
       accountLabel: integration?.accountLabel ?? null,
       credentialRef: integration?.credentialRef ?? null,
-      connectedAt: integration?.connectedAt ?? null,
       isSaved: Boolean(integration),
       connectMode: getIntegrationConnectMode(type)
     };
@@ -127,9 +139,8 @@ export default async function TenantDetailPage({
           </p>
           <h1 style={{ margin: "10px 0", fontSize: 52 }}>{tenant.name}</h1>
           <p style={{ margin: 0, fontSize: 18, maxWidth: 820, lineHeight: 1.6 }}>
-            This page is the operator view for one client: first confirm their
-            connected services, then create their dedicated workflow set, then clear
-            the final launch checklist.
+            Open one client, see exactly what they connected, create a channel-specific
+            agent for them, and then review that agent&apos;s launch blockers.
           </p>
         </div>
 
@@ -155,401 +166,255 @@ export default async function TenantDetailPage({
             )}
 
             {sectionCard(
-              "Operator Summary",
-              <div style={{ display: "grid", gap: 16 }}>
-                <div
-                  style={{
-                    borderRadius: 18,
-                    padding: 16,
-                    border: "1px solid var(--line)",
-                    background:
-                      agent && launchCheck
-                        ? launchCheck.canLaunch
-                          ? "rgba(62,107,55,0.08)"
-                          : "rgba(246,190,58,0.12)"
-                        : creationCheck?.canCreateAgent
-                          ? "rgba(62,107,55,0.08)"
-                          : "rgba(138,47,47,0.08)"
-                  }}
-                >
-                  <p style={{ margin: 0, fontWeight: 700 }}>
-                    {agent && launchCheck
-                      ? launchCheck.canLaunch
-                        ? "Agent exists and looks ready for final review."
-                        : "Agent exists, but there are still launch blockers to clear."
-                      : creationCheck?.canCreateAgent
-                        ? "Client setup is ready. You can create this tenant's dedicated workflow set now."
-                        : "Client setup is still incomplete, so agent creation stays blocked for now."}
+              "Create Channel Agent",
+              !selectedTemplate ? (
+                <p style={{ margin: 0, color: "var(--muted)" }}>
+                  No templates are available yet.
+                </p>
+              ) : (
+                <div style={{ display: "grid", gap: 16 }}>
+                  <p style={{ margin: 0, color: "var(--muted)", lineHeight: 1.7 }}>
+                    Create agents from this client&apos;s page, not from the global admin
+                    page. Choose the channel you want to launch now.
                   </p>
-                  <p style={{ margin: "8px 0 0", color: "var(--muted)" }}>
-                    {agent && launchCheck
-                      ? `Current launch stage: ${launchCheck.stage}`
-                      : selectedTemplate
-                        ? `Checking readiness against template: ${selectedTemplate.name}`
-                        : "No template selected yet."}
-                  </p>
+
+                  <div style={{ display: "grid", gap: 10 }}>
+                    {channelChecks.map((item) => (
+                      <div
+                        key={item.value}
+                        style={{
+                          border: "1px solid var(--line)",
+                          borderRadius: 18,
+                          padding: 14,
+                          background: item.canCreate
+                            ? "rgba(62,107,55,0.08)"
+                            : "rgba(138,47,47,0.08)"
+                        }}
+                      >
+                        <p style={{ margin: 0, fontWeight: 700 }}>{item.label}</p>
+                        <p style={{ margin: "8px 0 0", color: "var(--muted)" }}>
+                          {item.canCreate
+                            ? "Ready to create now."
+                            : `Still needed: ${item.missingLabels.join(", ")}.`}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+
+                  <TenantCreateAgentForm
+                    tenantId={tenant.id}
+                    tenantName={tenant.name}
+                    templates={templates.map((template) => ({
+                      id: template.id,
+                      name: template.name,
+                      niche: template.niche
+                    }))}
+                    channels={channelChecks.map((item) => ({
+                      value: item.value,
+                      label: item.label,
+                      missingLabels: item.missingLabels,
+                      canCreate: item.canCreate
+                    }))}
+                  />
                 </div>
-
-                {!agent && creationCheck ? (
-                  <div>
-                    <p style={{ margin: 0, fontWeight: 700 }}>Before agent creation</p>
-                    {creationCheck.missingIntegrationLabels.length === 0 ? (
-                      <p style={{ margin: "8px 0 0", color: "var(--muted)" }}>
-                        All required client connections are already in place.
-                      </p>
-                    ) : (
-                      <ul style={{ margin: "10px 0 0", paddingLeft: 20, color: "var(--muted)" }}>
-                        {creationCheck.missingIntegrationLabels.map((item) => (
-                          <li key={item} style={{ marginTop: 8 }}>
-                            {item} still needs to be connected by the client.
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-                ) : null}
-
-                {agent && launchCheck ? (
-                  <div>
-                    <p style={{ margin: 0, fontWeight: 700 }}>Before activation</p>
-                    {launchCheck.blockingItems.length === 0 ? (
-                      <p style={{ margin: "8px 0 0", color: "var(--muted)" }}>
-                        No launch blockers found.
-                      </p>
-                    ) : (
-                      <ul style={{ margin: "10px 0 0", paddingLeft: 20, color: "var(--muted)" }}>
-                        {launchCheck.blockingItems.map((item) => (
-                          <li key={item} style={{ marginTop: 8 }}>
-                            {item}
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-                ) : null}
-              </div>
+              )
             )}
 
-            {!agent &&
+            {tenant.agents.length === 0 ? (
               sectionCard(
-                "Create Agent",
-                !selectedTemplate ? (
-                  <p style={{ margin: 0, color: "var(--muted)" }}>
-                    No templates are available yet.
-                  </p>
-                ) : !creationCheck?.canCreateAgent ? (
-                  <div style={{ display: "grid", gap: 10 }}>
-                    <p style={{ margin: 0, color: "var(--muted)", lineHeight: 1.7 }}>
-                      Agent creation unlocks only after the client has connected the
-                      required services for this template.
-                    </p>
-                    <p style={{ margin: 0, color: "var(--muted)" }}>
-                      Still missing: {creationCheck?.missingIntegrationLabels.join(", ")}.
-                    </p>
-                  </div>
-                ) : (
-                  <div style={{ display: "grid", gap: 12 }}>
-                    <p style={{ margin: 0, color: "var(--muted)", lineHeight: 1.7 }}>
-                      This creates a dedicated workflow set for {tenant.name} and
-                      uses the credentials the client already connected in their own
-                      dashboard.
-                    </p>
-                    <TenantCreateAgentForm
-                      tenantId={tenant.id}
-                      tenantName={tenant.name}
-                      templates={templates.map((template) => ({
-                        id: template.id,
-                        name: template.name,
-                        niche: template.niche
-                      }))}
-                    />
-                  </div>
-                )
-              )}
+                "Agents",
+                <p style={{ margin: 0, color: "var(--muted)" }}>
+                  No agents created for this client yet.
+                </p>
+              )
+            ) : (
+              tenant.agents.map((agent) => {
+                const config = agent.config;
+                const channel = inferAgentChannel(
+                  agent.workflows.map((workflow) => workflow.workflowKey)
+                );
+                const launchCheck = getAgentLaunchCheck({
+                  status: agent.status,
+                  config: agent.config,
+                  integrations: tenant.integrations,
+                  workflows: agent.workflows
+                });
 
-            {agent &&
-              sectionCard(
-                "Primary Agent",
-                <div>
-                  {keyValue("Agent name", agent.name)}
-                  {keyValue("Template", agent.template.name)}
-                  {keyValue("Niche", agent.template.niche)}
-                  {keyValue("Status", agent.status)}
-                  {launchCheck && keyValue("Launch stage", launchCheck.stage)}
-                  {launchCheck &&
-                    keyValue(
-                      "Ready to launch",
-                      launchCheck.canLaunch ? "Yes" : "Not yet"
-                    )}
-                  {keyValue(
-                    "Tools",
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      {agent.toolConfigs.map((tool) => (
-                        <span
-                          key={tool.id}
+                return sectionCard(
+                  `${getAgentChannelLabel(channel)}: ${agent.name}`,
+                  <div style={{ display: "grid", gap: 18 }}>
+                    <div>
+                      {keyValue("Template", agent.template.name)}
+                      {keyValue("Channel", getAgentChannelLabel(channel))}
+                      {keyValue("Status", agent.status)}
+                      {keyValue("Launch stage", launchCheck.stage)}
+                      {keyValue("Ready to launch", launchCheck.canLaunch ? "Yes" : "Not yet")}
+                      {keyValue(
+                        "Tools",
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                          {agent.toolConfigs.map((tool) => (
+                            <span
+                              key={tool.id}
+                              style={{
+                                border: "1px solid var(--line)",
+                                borderRadius: 999,
+                                padding: "6px 10px",
+                                background: "rgba(255,255,255,0.5)"
+                              }}
+                            >
+                              {tool.toolName}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    <div>
+                      <p style={{ margin: 0, fontWeight: 700 }}>Launch blockers</p>
+                      {launchCheck.blockingItems.length === 0 ? (
+                        <p style={{ margin: "8px 0 0", color: "var(--muted)" }}>
+                          No blockers found.
+                        </p>
+                      ) : (
+                        <ul style={{ margin: "10px 0 0", paddingLeft: 20, color: "var(--muted)" }}>
+                          {launchCheck.blockingItems.map((item) => (
+                            <li key={item} style={{ marginTop: 8 }}>
+                              {item}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+
+                    <AgentOperatorPanel
+                      agentId={agent.id}
+                      status={agent.status}
+                      canActivate={launchCheck.canLaunch}
+                      activateMessage={
+                        launchCheck.canLaunch
+                          ? undefined
+                          : "Activation stays locked until the launch checklist is clear."
+                      }
+                    />
+
+                    {config ? (
+                      <div style={{ display: "grid", gap: 16 }}>
+                        <div>
+                          {keyValue("Business name", config.businessName)}
+                          {keyValue("Owner", config.ownerName)}
+                          {keyValue("Website", config.website)}
+                          {keyValue("Contact email", config.contactEmail)}
+                        </div>
+
+                        <ConfigEditor
+                          agentId={agent.id}
+                          businessName={config.businessName}
+                          ownerName={config.ownerName}
+                          website={config.website}
+                          contactEmail={config.contactEmail}
+                          signature={config.signature}
+                          startingPrice={
+                            (config.pricing as { startingPrice: number }).startingPrice
+                          }
+                          callWindowStart={
+                            (
+                              config.businessRules as {
+                                callWindow: { start: string };
+                              }
+                            ).callWindow.start
+                          }
+                          callWindowEnd={
+                            (
+                              config.businessRules as {
+                                callWindow: { end: string };
+                              }
+                            ).callWindow.end
+                          }
+                          callWindowTimezone={
+                            (
+                              config.businessRules as {
+                                callWindow: { timezone: string };
+                              }
+                            ).callWindow.timezone
+                          }
+                        />
+                      </div>
+                    ) : null}
+
+                    <div style={{ display: "grid", gap: 10 }}>
+                      <p style={{ margin: 0, fontWeight: 700 }}>Workflow bindings</p>
+                      {agent.workflows.map((binding) => (
+                        <div
+                          key={binding.id}
                           style={{
                             border: "1px solid var(--line)",
-                            borderRadius: 999,
-                            padding: "6px 10px",
-                            background: "rgba(255,255,255,0.5)"
+                            borderRadius: 16,
+                            padding: 16
                           }}
                         >
-                          {tool.toolName}
-                        </span>
+                          <p style={{ margin: 0, fontWeight: 700 }}>{binding.workflowKey}</p>
+                          <p style={{ margin: "6px 0 0", color: "var(--muted)" }}>
+                            Status: {binding.status}
+                          </p>
+                          <p style={{ margin: "6px 0 0", color: "var(--muted)" }}>
+                            n8n workflow ID: {binding.n8nWorkflowId ?? "Not provisioned yet"}
+                          </p>
+                        </div>
                       ))}
                     </div>
-                  )}
-                </div>
-              )}
-
-            {agent &&
-              launchCheck &&
-              sectionCard(
-                "Launch Checklist",
-                <div style={{ display: "grid", gap: 16 }}>
-                  <div
-                    style={{
-                      borderRadius: 18,
-                      padding: 16,
-                      border: "1px solid var(--line)",
-                      background: launchCheck.canLaunch
-                        ? "rgba(62,107,55,0.08)"
-                        : "rgba(138,47,47,0.08)"
-                    }}
-                  >
-                    <p style={{ margin: 0, fontWeight: 700 }}>
-                      {launchCheck.canLaunch
-                        ? "This agent looks ready for final review and launch."
-                        : "This agent still has setup work left before launch."}
-                    </p>
-                    <p style={{ margin: "8px 0 0", color: "var(--muted)" }}>
-                      Current stage: {launchCheck.stage}
-                    </p>
                   </div>
-
-                  <div>
-                    <p style={{ margin: 0, fontWeight: 700 }}>What still needs attention</p>
-                    {launchCheck.blockingItems.length === 0 ? (
-                      <p style={{ margin: "8px 0 0", color: "var(--muted)" }}>
-                        No blocking issues found.
-                      </p>
-                    ) : (
-                      <ul style={{ margin: "10px 0 0", paddingLeft: 20, color: "var(--muted)" }}>
-                        {launchCheck.blockingItems.map((item) => (
-                          <li key={item} style={{ marginTop: 8 }}>
-                            {item}
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-
-                  <div>
-                    <p style={{ margin: 0, fontWeight: 700 }}>Notes</p>
-                    {launchCheck.notes.length === 0 ? (
-                      <p style={{ margin: "8px 0 0", color: "var(--muted)" }}>
-                        No extra notes right now.
-                      </p>
-                    ) : (
-                      <ul style={{ margin: "10px 0 0", paddingLeft: 20, color: "var(--muted)" }}>
-                        {launchCheck.notes.map((item) => (
-                          <li key={item} style={{ marginTop: 8 }}>
-                            {item}
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-                </div>
-              )}
-
-            {agent &&
-              sectionCard(
-                "Operator Controls",
-                <AgentOperatorPanel
-                  agentId={agent.id}
-                  status={agent.status}
-                  canActivate={launchCheck?.canLaunch ?? false}
-                  activateMessage={
-                    launchCheck?.canLaunch
-                      ? undefined
-                      : "Activation stays locked until the launch checklist is clear."
-                  }
-                />
-              )}
-
-            {config &&
-              sectionCard(
-                "Business Configuration",
-                <div>
-                  {keyValue("Business name", config.businessName)}
-                  {keyValue("Owner", config.ownerName)}
-                  {keyValue("Website", config.website)}
-                  {keyValue("Contact email", config.contactEmail)}
-                  {keyValue(
-                    "Starting price",
-                    `$${(config.pricing as { startingPrice: number }).startingPrice}`
-                  )}
-                  {keyValue(
-                    "Call window",
-                    `${((config.businessRules as { callWindow: { start: string; end: string; timezone: string } }).callWindow.start)} - ${((config.businessRules as { callWindow: { start: string; end: string; timezone: string } }).callWindow.end)} ${((config.businessRules as { callWindow: { timezone: string } }).callWindow.timezone)}`
-                  )}
-                </div>
-              )}
-
-            {config &&
-              sectionCard(
-                "Edit Agent Config",
-                <ConfigEditor
-                  agentId={agent.id}
-                  businessName={config.businessName}
-                  ownerName={config.ownerName}
-                  website={config.website}
-                  contactEmail={config.contactEmail}
-                  signature={config.signature}
-                  startingPrice={
-                    (config.pricing as { startingPrice: number }).startingPrice
-                  }
-                  callWindowStart={
-                    (
-                      config.businessRules as {
-                        callWindow: { start: string };
-                      }
-                    ).callWindow.start
-                  }
-                  callWindowEnd={
-                    (
-                      config.businessRules as {
-                        callWindow: { end: string };
-                      }
-                    ).callWindow.end
-                  }
-                  callWindowTimezone={
-                    (
-                      config.businessRules as {
-                        callWindow: { timezone: string };
-                      }
-                    ).callWindow.timezone
-                  }
-                />
-              )}
+                );
+              })
+            )}
           </div>
 
           <div style={{ display: "grid", gap: 20 }}>
             {sectionCard(
-              "Coverage Regions",
-              <div style={{ display: "grid", gap: 12 }}>
-                {config &&
-                  (
-                    config.coverageRules as {
-                      regions: { code: string; label: string; capacity: number }[];
-                    }
-                  ).regions.map((region) => (
-                    <div
-                      key={region.code}
-                      style={{
-                        border: "1px solid var(--line)",
-                        borderRadius: 18,
-                        padding: 16
-                      }}
-                    >
-                      <p style={{ margin: 0, fontWeight: 700 }}>{region.label}</p>
-                      <p style={{ margin: "6px 0 0", color: "var(--muted)" }}>
-                        Capacity: {region.capacity}
-                      </p>
-                    </div>
-                  ))}
-              </div>
-            )}
-
-            {sectionCard(
-              "Workflow Bindings",
+              "Client Connections",
               <div style={{ display: "grid", gap: 10 }}>
-                {(agent?.workflows ?? tenant.workflowBindings).length === 0 ? (
-                  <p style={{ margin: 0, color: "var(--muted)" }}>
-                    No workflows created for this tenant yet.
-                  </p>
-                ) : (
-                  (agent?.workflows ?? tenant.workflowBindings).map((binding) => (
-                    <div
-                      key={binding.id}
-                      style={{
-                        border: "1px solid var(--line)",
-                        borderRadius: 16,
-                        padding: 16
-                      }}
-                    >
-                      <p style={{ margin: 0, fontWeight: 700 }}>{binding.workflowKey}</p>
-                      <p style={{ margin: "6px 0 0", color: "var(--muted)" }}>
-                        Status: {binding.status}
+                {integrationsForDisplay.map((integration) => (
+                  <div
+                    key={integration.id}
+                    style={{
+                      border: "1px solid var(--line)",
+                      borderRadius: 16,
+                      padding: 16,
+                      display: "grid",
+                      gap: 10
+                    }}
+                  >
+                    <p style={{ margin: 0, fontWeight: 700 }}>
+                      {getIntegrationLabel(integration.type)}
+                    </p>
+                    <p style={{ margin: "6px 0 0", color: "var(--muted)" }}>
+                      Status: {integration.status}
+                    </p>
+                    <p style={{ margin: 0, color: "var(--muted)" }}>
+                      {integration.connectMode === "self_serve"
+                        ? "The client connects this in their dashboard. Those credentials are reused when you create the matching channel agent."
+                        : "This is completed operator-side later during launch."}
+                    </p>
+                    {integration.connectMode === "self_serve" ? (
+                      <ConnectIntegrationButton
+                        tenantSlug={tenant.slug}
+                        integrationType={integration.type}
+                        compact
+                      />
+                    ) : null}
+                    {integration.isSaved ? (
+                      <IntegrationOperatorForm
+                        integrationId={integration.id}
+                        status={integration.status}
+                        accountLabel={integration.accountLabel}
+                        credentialRef={integration.credentialRef}
+                      />
+                    ) : (
+                      <p style={{ margin: 0, color: "var(--muted)", fontSize: 13 }}>
+                        No saved connection record yet.
                       </p>
-                      {binding.status.includes("needs_connect") ? (
-                        <p style={{ margin: "6px 0 0", color: "var(--muted)" }}>
-                          This workflow was created without client credentials and
-                          will start working after integrations are connected.
-                        </p>
-                      ) : null}
-                      <p style={{ margin: "6px 0 0", color: "var(--muted)" }}>
-                        n8n workflow ID: {binding.n8nWorkflowId ?? "Not provisioned yet"}
-                      </p>
-                    </div>
-                  ))
-                )}
-              </div>
-            )}
-
-            {sectionCard(
-              "Integrations",
-              <div style={{ display: "grid", gap: 10 }}>
-                {integrationsForDisplay.length === 0 ? (
-                  <p style={{ margin: 0, color: "var(--muted)" }}>
-                    No integrations connected yet.
-                  </p>
-                ) : (
-                  integrationsForDisplay.map((integration) => (
-                    <div
-                      key={integration.id}
-                      style={{
-                        border: "1px solid var(--line)",
-                        borderRadius: 16,
-                        padding: 16,
-                        display: "grid",
-                        gap: 10
-                      }}
-                    >
-                      <p style={{ margin: 0, fontWeight: 700 }}>
-                        {getIntegrationLabel(integration.type)}
-                      </p>
-                      <p style={{ margin: "6px 0 0", color: "var(--muted)" }}>
-                        Status: {integration.status}
-                      </p>
-                      <p style={{ margin: 0, color: "var(--muted)" }}>
-                        {integration.connectMode === "self_serve"
-                          ? "The client can connect this directly in their dashboard. Those credentials are then used when you create their dedicated workflows."
-                          : "This connection is handled from the operator side during launch and support setup."}
-                      </p>
-                      {integration.connectMode === "self_serve" ? (
-                        <ConnectIntegrationButton
-                          tenantSlug={tenant.slug}
-                          integrationType={integration.type}
-                          compact
-                        />
-                      ) : null}
-                      {integration.isSaved ? (
-                        <IntegrationOperatorForm
-                          integrationId={integration.id}
-                          status={integration.status}
-                          accountLabel={integration.accountLabel}
-                          credentialRef={integration.credentialRef}
-                        />
-                      ) : (
-                        <p style={{ margin: 0, color: "var(--muted)", fontSize: 13 }}>
-                          No saved connection record yet.
-                        </p>
-                      )}
-                    </div>
-                  ))
-                )}
+                    )}
+                  </div>
+                ))}
               </div>
             )}
           </div>

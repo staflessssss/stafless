@@ -2,6 +2,8 @@
 
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
+import type { AgentChannel } from "@/lib/agent-channels";
+import { getAgentChannelLabel } from "@/lib/agent-channels";
 
 type TemplateOption = {
   id: string;
@@ -9,10 +11,18 @@ type TemplateOption = {
   niche: string;
 };
 
+type ChannelOption = {
+  value: AgentChannel;
+  label: string;
+  missingLabels: string[];
+  canCreate: boolean;
+};
+
 type Props = {
   tenantId: string;
   tenantName: string;
   templates: TemplateOption[];
+  channels: ChannelOption[];
 };
 
 const inputStyle: React.CSSProperties = {
@@ -39,14 +49,17 @@ const buttonStyle: React.CSSProperties = {
 export function TenantCreateAgentForm({
   tenantId,
   tenantName,
-  templates
+  templates,
+  channels
 }: Props) {
   const router = useRouter();
   const [templateId, setTemplateId] = useState(templates[0]?.id ?? "");
-  const [name, setName] = useState(`${tenantName} Agent`);
+  const [channel, setChannel] = useState<AgentChannel>(channels[0]?.value ?? "gmail");
+  const [name, setName] = useState(`${tenantName} Gmail Agent`);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const selectedChannel = channels.find((item) => item.value === channel) ?? null;
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -62,7 +75,8 @@ export function TenantCreateAgentForm({
         body: JSON.stringify({
           tenantId,
           templateId,
-          name
+          name,
+          channel
         })
       });
 
@@ -108,12 +122,49 @@ export function TenantCreateAgentForm({
         />
       </div>
 
+      <div style={{ display: "grid", gap: 6 }}>
+        <label htmlFor="tenant-agent-channel">Channel</label>
+        <select
+          id="tenant-agent-channel"
+          value={channel}
+          onChange={(event) => {
+            const nextChannel = event.target.value as AgentChannel;
+            setChannel(nextChannel);
+            setName(
+              nextChannel === "instagram"
+                ? `${tenantName} Instagram Agent`
+                : `${tenantName} Gmail Agent`
+            );
+          }}
+          style={inputStyle}
+        >
+          {channels.map((option) => (
+            <option key={option.value} value={option.value}>
+              {getAgentChannelLabel(option.value)}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {selectedChannel ? (
+        <p style={{ margin: 0, color: "var(--muted)" }}>
+          {selectedChannel.canCreate
+            ? `${selectedChannel.label} is ready to create with this client's connected accounts.`
+            : `Still needed for ${selectedChannel.label.toLowerCase()}: ${selectedChannel.missingLabels.join(", ")}.`}
+        </p>
+      ) : null}
+
       {error ? <p style={{ margin: 0, color: "#8a2f2f" }}>{error}</p> : null}
       {success ? <p style={{ margin: 0, color: "#3e6b37" }}>{success}</p> : null}
 
       <button
         type="submit"
-        disabled={isPending || !templateId || !name.trim()}
+        disabled={
+          isPending ||
+          !templateId ||
+          !name.trim() ||
+          !selectedChannel?.canCreate
+        }
         style={buttonStyle}
       >
         {isPending ? "Creating..." : "Create agent and workflows"}

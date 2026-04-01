@@ -1,8 +1,6 @@
 import Link from "next/link";
-import { getAgentCreationCheck } from "@/lib/agent-creation-check";
 import { getDashboardTenants } from "@/lib/dashboard";
-import { CreateAgentForm, CreateTenantForm } from "./admin-actions";
-import { db } from "@/lib/db";
+import { CreateTenantForm } from "./admin-actions";
 
 export const dynamic = "force-dynamic";
 
@@ -34,12 +32,6 @@ function statCard(label: string, value: string | number) {
 
 export default async function AdminPage() {
   const tenants = await getDashboardTenants();
-  const templates = await db.agentTemplate.findMany({
-    orderBy: {
-      createdAt: "asc"
-    }
-  });
-
   const agentCount = tenants.reduce((sum, tenant) => sum + tenant.agents.length, 0);
   const integrationCount = tenants.reduce(
     (sum, tenant) => sum + tenant.integrations.length,
@@ -49,7 +41,6 @@ export default async function AdminPage() {
     (sum, tenant) => sum + tenant.workflowBindings.length,
     0
   );
-  const primaryTemplate = templates[0] ?? null;
 
   return (
     <main style={{ padding: "40px 24px 80px" }}>
@@ -91,7 +82,7 @@ export default async function AdminPage() {
         <section
           style={{
             display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+            gridTemplateColumns: "minmax(320px, 420px)",
             gap: 20,
             marginBottom: 28
           }}
@@ -109,39 +100,6 @@ export default async function AdminPage() {
               Start a new client workspace without touching the database manually.
             </p>
             <CreateTenantForm />
-          </div>
-
-          <div
-            style={{
-              border: "1px solid var(--line)",
-              borderRadius: 24,
-              background: "var(--surface)",
-              padding: 24
-            }}
-          >
-            <h2 style={{ marginTop: 0, fontSize: 24 }}>Create agent</h2>
-            <p style={{ color: "var(--muted)", lineHeight: 1.6 }}>
-              The client connects their own services first. Once the required
-              connections are ready, you can create that tenant&apos;s dedicated
-              workflow set here.
-            </p>
-            <CreateAgentForm
-              tenants={tenants.map((tenant) => ({
-                id: tenant.id,
-                name: tenant.name,
-                slug: tenant.slug,
-                integrations: tenant.integrations.map((integration) => ({
-                  type: integration.type,
-                  status: integration.status
-                }))
-              }))}
-              templates={templates.map((template) => ({
-                id: template.id,
-                name: template.name,
-                niche: template.niche,
-                slug: template.slug
-              }))}
-            />
           </div>
         </section>
 
@@ -178,17 +136,10 @@ export default async function AdminPage() {
             const activeIntegrationCount = tenant.integrations.filter(
               (integration) => integration.status === "ACTIVE"
             ).length;
-            const creationCheck = primaryTemplate
-              ? getAgentCreationCheck(primaryTemplate.slug, tenant.integrations)
-              : null;
             const nextStep =
               tenant.agents.length > 0
-                ? "Agent created. Open tenant to review launch blockers and operator actions."
-                : creationCheck?.canCreateAgent
-                  ? "Client setup is ready. You can create this tenant's agent now."
-                  : creationCheck
-                    ? `Still missing: ${creationCheck.missingIntegrationLabels.join(", ")}.`
-                    : "Create a template first, then review setup readiness here.";
+                ? "Open the client page to review existing channel agents and create another one if needed."
+                : "Open the client page to see live connections and create the right channel agent there.";
 
             return (
               <div

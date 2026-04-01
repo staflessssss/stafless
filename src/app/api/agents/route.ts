@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import type { AgentChannel } from "@/lib/agent-channels";
 import { db } from "@/lib/db";
 import { parseApiError } from "@/app/api/tenants/utils";
 import { getAgentCreationCheck } from "@/lib/agent-creation-check";
@@ -8,7 +9,8 @@ import { provisionAgent } from "@/lib/agent-provisioning";
 const createAgentSchema = z.object({
   tenantId: z.string().min(1),
   templateId: z.string().min(1),
-  name: z.string().min(1)
+  name: z.string().min(1),
+  channel: z.enum(["gmail", "instagram"]).default("gmail")
 });
 
 export async function GET() {
@@ -60,7 +62,8 @@ export async function POST(request: NextRequest) {
 
     const creationCheck = getAgentCreationCheck(
       template.slug,
-      tenant.integrations
+      tenant.integrations,
+      payload.channel as AgentChannel
     );
 
     if (!creationCheck.canCreateAgent) {
@@ -72,7 +75,8 @@ export async function POST(request: NextRequest) {
     const agent = await provisionAgent({
       tenantId: payload.tenantId,
       templateId: payload.templateId,
-      name: payload.name
+      name: payload.name,
+      selectedChannels: [payload.channel as AgentChannel]
     });
 
     return NextResponse.json({ agent }, { status: 201 });

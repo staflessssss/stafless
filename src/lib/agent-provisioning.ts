@@ -4,6 +4,7 @@ import { requiredIntegrationsForTemplate } from "@/lib/integrations";
 import { provisionWorkflowBinding } from "@/lib/n8n";
 import { buildDefaultAgentConfig } from "@/lib/templates";
 import type { AgentConfig } from "@/types/agent-config";
+import type { AgentChannel } from "@/lib/agent-channels";
 
 type AgentSetupDefaults = ReturnType<typeof buildDefaultAgentConfig>;
 
@@ -23,6 +24,7 @@ type AgentSetupInput = {
     defaultTools: Prisma.JsonValue;
     defaultChannels?: Prisma.JsonValue;
   };
+  selectedChannels?: AgentChannel[];
   configOverrides?: AgentConfig;
   additionalWorkflowKeys?: string[];
 };
@@ -243,7 +245,7 @@ export async function applyAgentSetup(input: AgentSetupInput) {
 
   const workflowKeys = buildWorkflowKeys({
     defaultTools: input.template.defaultTools,
-    defaultChannels: input.template.defaultChannels,
+    defaultChannels: input.selectedChannels ?? input.template.defaultChannels,
     additionalWorkflowKeys: input.additionalWorkflowKeys
   });
 
@@ -266,6 +268,7 @@ export async function provisionAgent(params: {
   templateId: string;
   name: string;
   status?: RecordStatus;
+  selectedChannels?: AgentChannel[];
 }) {
   const tenant = await db.tenant.findUnique({
     where: { id: params.tenantId }
@@ -307,7 +310,8 @@ export async function provisionAgent(params: {
       slug: template.slug,
       defaultTools: template.defaultTools,
       defaultChannels: template.defaultChannels
-    }
+    },
+    selectedChannels: params.selectedChannels
   });
 
   return agent;

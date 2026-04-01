@@ -1,15 +1,16 @@
 import type {
   AgentConfig,
-  AgentTemplate,
   Integration,
   RecordStatus,
   WorkflowBinding
 } from "@prisma/client";
-import { getIntegrationLabel, requiredIntegrationsForTemplate } from "@/lib/integrations";
+import {
+  getIntegrationLabel,
+  requiredIntegrationsForWorkflow
+} from "@/lib/integrations";
 
 type AgentLaunchCheckInput = {
   status: RecordStatus;
-  template: Pick<AgentTemplate, "slug">;
   config: AgentConfig | null;
   integrations: Pick<Integration, "type" | "status">[];
   workflows: Pick<WorkflowBinding, "workflowKey" | "status" | "n8nWorkflowId">[];
@@ -54,7 +55,13 @@ export function getAgentLaunchCheck(input: AgentLaunchCheckInput): AgentLaunchCh
     }
   }
 
-  const requiredIntegrations = requiredIntegrationsForTemplate(input.template.slug);
+  const requiredIntegrations = Array.from(
+    new Set(
+      input.workflows.flatMap((workflow) =>
+        requiredIntegrationsForWorkflow(workflow.workflowKey)
+      )
+    )
+  );
 
   for (const integrationType of requiredIntegrations) {
     const integration = input.integrations.find((item) => item.type === integrationType);
