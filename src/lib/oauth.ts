@@ -1,6 +1,7 @@
 import { createHmac, randomBytes } from "node:crypto";
 import { cookies } from "next/headers";
 import { IntegrationType, RecordStatus } from "@prisma/client";
+import { reprovisionAgent } from "@/lib/agent-provisioning";
 import { db } from "@/lib/db";
 import { env } from "@/lib/env";
 import { getIntegrationLabel } from "@/lib/integrations";
@@ -81,6 +82,17 @@ function getProviderForIntegration(integrationType: IntegrationType): OAuthProvi
       return "meta";
     default:
       return null;
+  }
+}
+
+function getWorkflowKeysForIntegration(integrationType: IntegrationType) {
+  switch (integrationType) {
+    case IntegrationType.GMAIL:
+      return ["gmail_adapter"];
+    case IntegrationType.INSTAGRAM:
+      return ["instagram_adapter"];
+    default:
+      return [];
   }
 }
 
@@ -384,6 +396,28 @@ export async function finalizeOAuthConnection(input: {
       connectedAt: result.connectedAt
     }
   });
+
+  const agents = await db.agent.findMany({
+    where: {
+      tenantId: tenant.id
+    },
+    select: {
+      id: true
+    }
+  });
+
+  const workflowKeys = getWorkflowKeysForIntegration(result.integrationType);
+
+  if (workflowKeys.length > 0) {
+    await Promise.all(
+      agents.map((agent) =>
+        reprovisionAgent({
+          agentId: agent.id,
+          workflowKeys
+        }).catch(() => null)
+      )
+    );
+  }
 
   return { integration, redirectTo: input.state.redirectTo };
 }

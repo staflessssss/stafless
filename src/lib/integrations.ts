@@ -87,7 +87,11 @@ export function requiredIntegrationsForTemplate(templateSlug: string) {
 export function requiredIntegrationsForWorkflow(workflowKey: string) {
   switch (workflowKey as WorkflowTemplateRole) {
     case "handle_incoming_message":
-      return [IntegrationType.GMAIL, IntegrationType.GOOGLE_DRIVE];
+      return [IntegrationType.GOOGLE_DRIVE];
+    case "gmail_adapter":
+      return [IntegrationType.GMAIL];
+    case "instagram_adapter":
+      return [IntegrationType.INSTAGRAM];
     case "check_availability":
       return [IntegrationType.GOOGLE_SHEETS];
     case "check_calendar":

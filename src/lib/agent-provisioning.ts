@@ -21,6 +21,7 @@ type AgentSetupInput = {
     id: string;
     slug: string;
     defaultTools: Prisma.JsonValue;
+    defaultChannels?: Prisma.JsonValue;
   };
   configOverrides?: AgentConfig;
   additionalWorkflowKeys?: string[];
@@ -34,14 +35,104 @@ function normalizeToolNames(defaultTools: Prisma.JsonValue) {
 
 function buildWorkflowKeys(input: {
   defaultTools: Prisma.JsonValue;
+  defaultChannels?: Prisma.JsonValue;
   additionalWorkflowKeys?: string[];
 }) {
+  const channelWorkflowKeys = Array.isArray(input.defaultChannels)
+    ? input.defaultChannels.flatMap((channel) => {
+        if (channel === "gmail") {
+          return ["gmail_adapter"];
+        }
+
+        if (channel === "instagram") {
+          return ["instagram_adapter"];
+        }
+
+        return [];
+      })
+    : [];
+
   return Array.from(
     new Set([
       "handle_incoming_message",
+      ...channelWorkflowKeys,
       ...normalizeToolNames(input.defaultTools),
       ...(input.additionalWorkflowKeys ?? [])
     ])
+  );
+}
+
+async function provisionWorkflowBindings(input: {
+  tenant: AgentSetupInput["tenant"];
+  agent: AgentSetupInput["agent"];
+  workflowKeys: string[];
+  integrations: Awaited<ReturnType<typeof db.integration.upsert>>[];
+  businessContext: {
+    businessName: string;
+    website: string;
+    contactEmail: string;
+    signature: string;
+  };
+}) {
+  await Promise.all(
+    input.workflowKeys.map(async (workflowKey) => {
+      try {
+        const provisioned = await provisionWorkflowBinding({
+          tenantId: input.tenant.id,
+          agentId: input.agent.id,
+          workflowKey,
+          tenantSlug: input.tenant.slug,
+          agentName: input.agent.name,
+          integrations: input.integrations,
+          businessContext: input.businessContext
+        });
+
+        await db.workflowBinding.upsert({
+          where: {
+            agentId_workflowKey: {
+              agentId: input.agent.id,
+              workflowKey
+            }
+          },
+          update: {
+            tenantId: input.tenant.id,
+            n8nWorkflowId: provisioned.n8nWorkflowId,
+            status: provisioned.status
+          },
+          create: {
+            tenantId: input.tenant.id,
+            agentId: input.agent.id,
+            workflowKey,
+            n8nWorkflowId: provisioned.n8nWorkflowId,
+            status: provisioned.status
+          }
+        });
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message.slice(0, 180) : "Unknown error";
+
+        await db.workflowBinding.upsert({
+          where: {
+            agentId_workflowKey: {
+              agentId: input.agent.id,
+              workflowKey
+            }
+          },
+          update: {
+            tenantId: input.tenant.id,
+            n8nWorkflowId: null,
+            status: `failed:${message}`
+          },
+          create: {
+            tenantId: input.tenant.id,
+            agentId: input.agent.id,
+            workflowKey,
+            n8nWorkflowId: null,
+            status: `failed:${message}`
+          }
+        });
+      }
+    })
   );
 }
 
@@ -152,74 +243,22 @@ export async function applyAgentSetup(input: AgentSetupInput) {
 
   const workflowKeys = buildWorkflowKeys({
     defaultTools: input.template.defaultTools,
+    defaultChannels: input.template.defaultChannels,
     additionalWorkflowKeys: input.additionalWorkflowKeys
   });
 
-  await Promise.all(
-    workflowKeys.map(async (workflowKey) => {
-      try {
-        const provisioned = await provisionWorkflowBinding({
-          tenantId: input.tenant.id,
-          agentId: input.agent.id,
-          workflowKey,
-          tenantSlug: input.tenant.slug,
-          agentName: input.agent.name,
-          integrations,
-          businessContext: {
-            businessName: defaults.businessName,
-            website: defaults.website,
-            contactEmail: defaults.contactEmail,
-            signature: defaults.signature
-          }
-        });
-
-        await db.workflowBinding.upsert({
-          where: {
-            agentId_workflowKey: {
-              agentId: input.agent.id,
-              workflowKey
-            }
-          },
-          update: {
-            tenantId: input.tenant.id,
-            n8nWorkflowId: provisioned.n8nWorkflowId,
-            status: provisioned.status
-          },
-          create: {
-            tenantId: input.tenant.id,
-            agentId: input.agent.id,
-            workflowKey,
-            n8nWorkflowId: provisioned.n8nWorkflowId,
-            status: provisioned.status
-          }
-        });
-      } catch (error) {
-        const message =
-          error instanceof Error ? error.message.slice(0, 180) : "Unknown error";
-
-        await db.workflowBinding.upsert({
-          where: {
-            agentId_workflowKey: {
-              agentId: input.agent.id,
-              workflowKey
-            }
-          },
-          update: {
-            tenantId: input.tenant.id,
-            n8nWorkflowId: null,
-            status: `failed:${message}`
-          },
-          create: {
-            tenantId: input.tenant.id,
-            agentId: input.agent.id,
-            workflowKey,
-            n8nWorkflowId: null,
-            status: `failed:${message}`
-          }
-        });
-      }
-    })
-  );
+  await provisionWorkflowBindings({
+    tenant: input.tenant,
+    agent: input.agent,
+    workflowKeys,
+    integrations,
+    businessContext: {
+      businessName: defaults.businessName,
+      website: defaults.website,
+      contactEmail: defaults.contactEmail,
+      signature: defaults.signature
+    }
+  });
 }
 
 export async function provisionAgent(params: {
@@ -266,7 +305,8 @@ export async function provisionAgent(params: {
     template: {
       id: template.id,
       slug: template.slug,
-      defaultTools: template.defaultTools
+      defaultTools: template.defaultTools,
+      defaultChannels: template.defaultChannels
     }
   });
 
@@ -303,7 +343,8 @@ export async function reprovisionAgent(params: {
     template: {
       id: agent.template.id,
       slug: agent.template.slug,
-      defaultTools: agent.template.defaultTools
+      defaultTools: agent.template.defaultTools,
+      defaultChannels: agent.template.defaultChannels
     },
     configOverrides: agent.config
       ? {

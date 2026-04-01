@@ -13,7 +13,7 @@ export async function createMyndfulTenantSetup() {
       niche: "wedding",
       basePrompt: weddingLeadAgentBasePrompt,
       defaultTools: ["check_availability", "check_calendar", "book_call"],
-      defaultChannels: ["gmail"],
+      defaultChannels: ["gmail", "instagram"],
       workflowTemplateMap: {}
     }
   });
