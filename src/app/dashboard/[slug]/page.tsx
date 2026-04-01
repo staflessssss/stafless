@@ -1,5 +1,6 @@
 import { getDashboardTenantOr404, renderDashboardPage } from "./helpers";
 import { buildActivityFeed, buildBookingSummary, buildConversationFeed, getDisplayIntegrations } from "./presentation";
+import { getAgentCreationCheck } from "@/lib/agent-creation-check";
 
 function statCard(label: string, value: string | number, note: string) {
   return (
@@ -29,12 +30,16 @@ export default async function TenantDashboardPage({
   const { slug } = await params;
   const tenant = await getDashboardTenantOr404(slug);
   const agent = tenant.agents[0];
-  const integrations = getDisplayIntegrations(tenant);
+  const templateSlug = agent?.template.slug ?? "wedding-lead-agent";
+  const integrations = getDisplayIntegrations(tenant, templateSlug);
+  const creationCheck = getAgentCreationCheck(templateSlug, tenant.integrations);
   const conversations = buildConversationFeed(tenant);
   const activity = buildActivityFeed(tenant);
   const bookings = buildBookingSummary(tenant);
   const connectedChannels = integrations.filter((integration) => integration.isConnected).length;
   const hasLiveData = tenant.conversations.length > 0 || tenant.appointments.length > 0;
+  const connectedRequiredServices = creationCheck.connectedIntegrationTypes.length;
+  const totalRequiredServices = creationCheck.requiredIntegrationTypes.length;
 
   return renderDashboardPage({
     tenantName: tenant.name,
@@ -45,6 +50,40 @@ export default async function TenantDashboardPage({
     active: "overview",
     children: (
       <div style={{ display: "grid", gap: 22 }}>
+        <section
+          style={{
+            border: "1px solid var(--line)",
+            borderRadius: 30,
+            padding: 24,
+            background:
+              "radial-gradient(circle at top right, rgba(90,209,138,0.12), transparent 24%), linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02))",
+            display: "grid",
+            gap: 16
+          }}
+        >
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+            <div>
+              <p style={{ margin: 0, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.12em", fontSize: 12 }}>
+                Setup Progress
+              </p>
+              <h2 style={{ marginTop: 10, fontSize: 32 }}>
+                {creationCheck.canCreateAgent
+                  ? "Your setup is ready for agent creation"
+                  : "Finish your connections to unlock launch prep"}
+              </h2>
+            </div>
+            <strong style={{ fontSize: 22, color: "var(--text)" }}>
+              {connectedRequiredServices}/{totalRequiredServices} required services connected
+            </strong>
+          </div>
+
+          <p style={{ margin: 0, color: "var(--muted)", lineHeight: 1.7 }}>
+            {creationCheck.canCreateAgent
+              ? "Your operator can now create your dedicated workflow set and continue with final review."
+              : `Still needed before agent creation: ${creationCheck.missingIntegrationLabels.join(", ")}.`}
+          </p>
+        </section>
+
         <section
           style={{
             display: "grid",

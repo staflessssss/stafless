@@ -1,6 +1,14 @@
 import { IntegrationType } from "@prisma/client";
 import type { getTenantBySlug } from "@/lib/dashboard";
-import { getClientChannelTypes, getIntegrationDescription, getIntegrationGradient, getIntegrationLabel } from "@/lib/integrations";
+import {
+  getIntegrationConnectLabel,
+  getIntegrationConnectMode,
+  getIntegrationDescription,
+  getIntegrationGradient,
+  getIntegrationLabel,
+  getIntegrationSetupHint,
+  getVisibleIntegrationTypes
+} from "@/lib/integrations";
 
 type TenantData = NonNullable<Awaited<ReturnType<typeof getTenantBySlug>>>;
 
@@ -16,6 +24,8 @@ export type DisplayIntegration = {
   connectedAt: Date | null;
   ctaLabel: string;
   isConnected: boolean;
+  connectMode: "self_serve" | "operator_assisted";
+  setupHint: string;
 };
 
 export type DisplayConversation = {
@@ -80,10 +90,14 @@ export function getConversationChannelLabel(channel: string) {
   }
 }
 
-export function getDisplayIntegrations(tenant: TenantData): DisplayIntegration[] {
+export function getDisplayIntegrations(tenant: TenantData, templateSlug: string): DisplayIntegration[] {
   const integrationMap = new Map(tenant.integrations.map((integration) => [integration.type, integration]));
+  const visibleIntegrationTypes = getVisibleIntegrationTypes(
+    templateSlug,
+    tenant.integrations.map((integration) => integration.type)
+  );
 
-  return getClientChannelTypes(tenant.integrations.map((integration) => integration.type)).map((type) => {
+  return visibleIntegrationTypes.map((type) => {
     const integration = integrationMap.get(type);
     const isConnected = integration?.status === "ACTIVE";
 
@@ -97,8 +111,10 @@ export function getDisplayIntegrations(tenant: TenantData): DisplayIntegration[]
       statusLabel: isConnected ? "Connected" : "Ready to connect",
       accountLabel: integration?.accountLabel ?? null,
       connectedAt: integration?.connectedAt ?? null,
-      ctaLabel: isConnected ? `Reconnect ${getIntegrationLabel(type)}` : `Connect ${getIntegrationLabel(type)}`,
-      isConnected
+      ctaLabel: getIntegrationConnectLabel(type, isConnected),
+      isConnected,
+      connectMode: getIntegrationConnectMode(type),
+      setupHint: getIntegrationSetupHint(type)
     };
   });
 }

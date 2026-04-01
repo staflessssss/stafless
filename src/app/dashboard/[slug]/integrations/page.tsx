@@ -1,6 +1,7 @@
 import { ConnectIntegrationButton } from "@/app/admin/tenants/[slug]/connect-integration-button";
 import { renderDashboardPage, getDashboardTenantOr404 } from "../helpers";
 import { formatFriendlyDate, getDisplayIntegrations } from "../presentation";
+import { getAgentCreationCheck } from "@/lib/agent-creation-check";
 
 function banner(message: string, tone: "success" | "warning") {
   return (
@@ -30,7 +31,9 @@ export default async function TenantIntegrationsPage({
   const { slug } = await params;
   const query = await searchParams;
   const tenant = await getDashboardTenantOr404(slug);
-  const integrations = getDisplayIntegrations(tenant);
+  const templateSlug = tenant.agents[0]?.template.slug ?? "wedding-lead-agent";
+  const integrations = getDisplayIntegrations(tenant, templateSlug);
+  const creationCheck = getAgentCreationCheck(templateSlug, tenant.integrations);
 
   return renderDashboardPage({
     tenantName: tenant.name,
@@ -45,6 +48,12 @@ export default async function TenantIntegrationsPage({
           ? banner("Your channel was connected successfully and is now ready for live conversations.", "success")
           : null}
         {query.error ? banner(query.error, "warning") : null}
+        {banner(
+          creationCheck.canCreateAgent
+            ? "Your required client connections are ready. Your operator can now create your dedicated assistant workflows and continue with launch review."
+            : `Finish these required connections first: ${creationCheck.missingIntegrationLabels.join(", ")}.`,
+          creationCheck.canCreateAgent ? "success" : "warning"
+        )}
 
         <section
           style={{
@@ -118,6 +127,9 @@ export default async function TenantIntegrationsPage({
               <div style={{ display: "grid", gap: 8 }}>
                 <h3 style={{ fontSize: 26 }}>{integration.label}</h3>
                 <p style={{ color: "var(--muted)", lineHeight: 1.7 }}>{integration.description}</p>
+                <p style={{ color: "var(--muted)", lineHeight: 1.7, margin: 0 }}>
+                  {integration.setupHint}
+                </p>
               </div>
 
               <div
@@ -144,12 +156,28 @@ export default async function TenantIntegrationsPage({
               </div>
 
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                <ConnectIntegrationButton
-                  tenantSlug={tenant.slug}
-                  integrationType={integration.type}
-                  ctaLabel={integration.ctaLabel}
-                  connected={integration.isConnected}
-                />
+                {integration.connectMode === "self_serve" ? (
+                  <ConnectIntegrationButton
+                    tenantSlug={tenant.slug}
+                    integrationType={integration.type}
+                    ctaLabel={integration.ctaLabel}
+                    connected={integration.isConnected}
+                  />
+                ) : (
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      padding: "12px 16px",
+                      borderRadius: 999,
+                      background: "rgba(255,255,255,0.06)",
+                      border: "1px solid var(--line)",
+                      color: "var(--text)"
+                    }}
+                  >
+                    {integration.ctaLabel}
+                  </span>
+                )}
                 <span
                   style={{
                     display: "inline-flex",
@@ -161,7 +189,9 @@ export default async function TenantIntegrationsPage({
                     color: "var(--muted)"
                   }}
                 >
-                  Secure OAuth
+                  {integration.connectMode === "self_serve"
+                    ? "Secure OAuth"
+                    : "Operator-assisted"}
                 </span>
               </div>
             </article>

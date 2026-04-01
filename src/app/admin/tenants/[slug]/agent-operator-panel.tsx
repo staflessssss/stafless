@@ -6,6 +6,8 @@ import { useState, useTransition } from "react";
 type Props = {
   agentId: string;
   status: "DRAFT" | "ACTIVE" | "PAUSED" | "DISABLED";
+  canActivate: boolean;
+  activateMessage?: string;
 };
 
 const buttonStyle: React.CSSProperties = {
@@ -24,7 +26,12 @@ const secondaryButtonStyle: React.CSSProperties = {
   background: "rgba(15, 23, 42, 0.82)"
 };
 
-export function AgentOperatorPanel({ agentId, status }: Props) {
+export function AgentOperatorPanel({
+  agentId,
+  status,
+  canActivate,
+  activateMessage
+}: Props) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -61,7 +68,7 @@ export function AgentOperatorPanel({ agentId, status }: Props) {
         {status !== "ACTIVE" ? (
           <button
             type="button"
-            disabled={isPending}
+            disabled={isPending || !canActivate}
             style={buttonStyle}
             onClick={() =>
               runRequest({ status: "ACTIVE" }, "Agent set to ACTIVE.")
@@ -105,6 +112,10 @@ export function AgentOperatorPanel({ agentId, status }: Props) {
           {isPending ? "Working..." : "Reprovision workflows"}
         </button>
       </div>
+
+      {!canActivate && activateMessage ? (
+        <p style={{ margin: 0, color: "var(--muted)" }}>{activateMessage}</p>
+      ) : null}
 
       {error ? <p style={{ margin: 0, color: "#8a2f2f" }}>{error}</p> : null}
       {success ? <p style={{ margin: 0, color: "#3e6b37" }}>{success}</p> : null}

@@ -1,6 +1,8 @@
 import { IntegrationType } from "@prisma/client";
 import type { WorkflowTemplateRole } from "@/types/workflow-template-map";
 
+export type IntegrationConnectMode = "self_serve" | "operator_assisted";
+
 export function parseIntegrationType(value: string) {
   const normalized = value.trim().toUpperCase();
   return Object.values(IntegrationType).find((type) => type === normalized) ?? null;
@@ -82,6 +84,82 @@ export function requiredIntegrationsForTemplate(templateSlug: string) {
   }
 
   return [IntegrationType.GMAIL];
+}
+
+export function requiredClientIntegrationsForTemplate(templateSlug: string) {
+  if (templateSlug === "wedding-lead-agent") {
+    return [
+      IntegrationType.GMAIL,
+      IntegrationType.INSTAGRAM,
+      IntegrationType.GOOGLE_CALENDAR,
+      IntegrationType.GOOGLE_DRIVE,
+      IntegrationType.GOOGLE_SHEETS
+    ];
+  }
+
+  return [IntegrationType.GMAIL];
+}
+
+export function getVisibleIntegrationTypes(
+  templateSlug: string,
+  existingTypes: IntegrationType[]
+) {
+  return Array.from(
+    new Set([
+      ...requiredClientIntegrationsForTemplate(templateSlug),
+      ...requiredIntegrationsForTemplate(templateSlug),
+      ...existingTypes
+    ])
+  );
+}
+
+export function getIntegrationConnectMode(type: IntegrationType) {
+  switch (type) {
+    case IntegrationType.GMAIL:
+    case IntegrationType.GOOGLE_CALENDAR:
+    case IntegrationType.GOOGLE_SHEETS:
+    case IntegrationType.GOOGLE_DRIVE:
+    case IntegrationType.INSTAGRAM:
+      return "self_serve" satisfies IntegrationConnectMode;
+    case IntegrationType.TELEGRAM:
+    default:
+      return "operator_assisted" satisfies IntegrationConnectMode;
+  }
+}
+
+export function getIntegrationConnectLabel(type: IntegrationType, connected: boolean) {
+  switch (type) {
+    case IntegrationType.GMAIL:
+    case IntegrationType.GOOGLE_CALENDAR:
+    case IntegrationType.GOOGLE_SHEETS:
+    case IntegrationType.GOOGLE_DRIVE:
+      return connected ? "Reconnect Google Workspace" : "Connect Google Workspace";
+    case IntegrationType.INSTAGRAM:
+      return connected ? "Reconnect Instagram" : "Connect Instagram";
+    case IntegrationType.TELEGRAM:
+      return "Handled during launch";
+    default:
+      return connected ? `Reconnect ${getIntegrationLabel(type)}` : `Connect ${getIntegrationLabel(type)}`;
+  }
+}
+
+export function getIntegrationSetupHint(type: IntegrationType) {
+  switch (type) {
+    case IntegrationType.GMAIL:
+      return "One secure Google sign-in also unlocks Calendar, Sheets, and Drive for your assistant.";
+    case IntegrationType.GOOGLE_CALENDAR:
+      return "Covered by the same Google Workspace connection as Gmail, Sheets, and Drive.";
+    case IntegrationType.GOOGLE_SHEETS:
+      return "Covered by the same Google Workspace connection as Gmail, Calendar, and Drive.";
+    case IntegrationType.GOOGLE_DRIVE:
+      return "Covered by the same Google Workspace connection as Gmail, Calendar, and Sheets.";
+    case IntegrationType.INSTAGRAM:
+      return "Connect your Instagram business account to bring DMs into the assistant.";
+    case IntegrationType.TELEGRAM:
+      return "We finish this operator-side during launch for internal alerts and handoff flows.";
+    default:
+      return "Connect this service to unlock the assistant setup.";
+  }
 }
 
 export function requiredIntegrationsForWorkflow(workflowKey: string) {

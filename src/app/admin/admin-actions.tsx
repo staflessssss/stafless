@@ -2,17 +2,25 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import type { IntegrationType, RecordStatus } from "@prisma/client";
+import { getAgentCreationCheck } from "@/lib/agent-creation-check";
+import { getIntegrationLabel } from "@/lib/integrations";
 
 type TemplateOption = {
   id: string;
   name: string;
   niche: string;
+  slug: string;
 };
 
 type TenantOption = {
   id: string;
   name: string;
   slug: string;
+  integrations: Array<{
+    type: IntegrationType;
+    status: RecordStatus;
+  }>;
 };
 
 function slugify(value: string) {
@@ -121,6 +129,13 @@ export function CreateAgentForm({
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
+  const selectedTenant = tenants.find((tenant) => tenant.id === tenantId) ?? null;
+  const selectedTemplate = templates.find((template) => template.id === templateId) ?? null;
+  const creationCheck =
+    selectedTenant && selectedTemplate
+      ? getAgentCreationCheck(selectedTemplate.slug, selectedTenant.integrations)
+      : null;
+
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
@@ -151,6 +166,60 @@ export function CreateAgentForm({
 
   return (
     <form onSubmit={onSubmit} style={{ display: "grid", gap: 14 }}>
+      <div
+        style={{
+          border: "1px solid var(--line)",
+          borderRadius: 18,
+          padding: 14,
+          background: "rgba(255,255,255,0.5)",
+          display: "grid",
+          gap: 10
+        }}
+      >
+        <p style={{ margin: 0, color: "var(--muted)", lineHeight: 1.6 }}>
+          The client connects their own services in the dashboard first. Once the
+          required connections are ready, agent creation becomes available here for
+          the operator.
+        </p>
+
+        {selectedTemplate && creationCheck ? (
+          <div style={{ display: "grid", gap: 8 }}>
+            <p style={{ margin: 0, fontWeight: 700 }}>
+              Required services for {selectedTemplate.name}
+            </p>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {creationCheck.requiredIntegrationTypes.map((integrationType) => {
+                const isConnected = creationCheck.connectedIntegrationTypes.includes(
+                  integrationType
+                );
+
+                return (
+                  <span
+                    key={integrationType}
+                    style={{
+                      border: "1px solid var(--line)",
+                      borderRadius: 999,
+                      padding: "6px 10px",
+                      background: isConnected
+                        ? "rgba(62,107,55,0.12)"
+                        : "rgba(138,47,47,0.08)",
+                      color: isConnected ? "#3e6b37" : "#8a2f2f"
+                    }}
+                  >
+                    {getIntegrationLabel(integrationType)} {isConnected ? "connected" : "missing"}
+                  </span>
+                );
+              })}
+            </div>
+            <p style={{ margin: 0, color: "var(--muted)" }}>
+              {creationCheck.canCreateAgent
+                ? "Everything required is connected. You can create this client's workflow set now."
+                : `Still missing: ${creationCheck.missingIntegrationLabels.join(", ")}.`}
+            </p>
+          </div>
+        ) : null}
+      </div>
+
       <div style={{ display: "grid", gap: 6 }}>
         <label htmlFor="agent-tenant">Tenant</label>
         <select
@@ -199,10 +268,19 @@ export function CreateAgentForm({
 
       <button
         type="submit"
-        disabled={isPending || !tenantId || !templateId}
+        disabled={
+          isPending ||
+          !tenantId ||
+          !templateId ||
+          !creationCheck?.canCreateAgent
+        }
         style={buttonStyle}
       >
-        {isPending ? "Creating..." : "Create agent"}
+        {isPending
+          ? "Creating..."
+          : creationCheck?.canCreateAgent
+            ? "Create agent"
+            : "Waiting for client connections"}
       </button>
     </form>
   );

@@ -14,7 +14,10 @@ const GOOGLE_SCOPES = [
   "email",
   "profile",
   "https://www.googleapis.com/auth/gmail.modify",
-  "https://www.googleapis.com/auth/gmail.send"
+  "https://www.googleapis.com/auth/gmail.send",
+  "https://www.googleapis.com/auth/calendar",
+  "https://www.googleapis.com/auth/spreadsheets",
+  "https://www.googleapis.com/auth/drive.readonly"
 ].join(" ");
 const META_SCOPES = [
   "pages_show_list",
@@ -36,12 +39,16 @@ type OAuthStatePayload = {
   expiresAt: number;
 };
 
-type OAuthConnectResult = {
+type ConnectedIntegrationResult = {
   integrationType: IntegrationType;
   status: RecordStatus;
   accountLabel: string;
   credentialRef: string;
   connectedAt: Date;
+};
+
+type OAuthConnectResult = {
+  integrations: ConnectedIntegrationResult[];
 };
 
 function getOAuthSecret() {
@@ -77,6 +84,9 @@ function decodeState(value: string) {
 function getProviderForIntegration(integrationType: IntegrationType): OAuthProvider | null {
   switch (integrationType) {
     case IntegrationType.GMAIL:
+    case IntegrationType.GOOGLE_CALENDAR:
+    case IntegrationType.GOOGLE_SHEETS:
+    case IntegrationType.GOOGLE_DRIVE:
       return "google";
     case IntegrationType.INSTAGRAM:
       return "meta";
@@ -89,6 +99,12 @@ function getWorkflowKeysForIntegration(integrationType: IntegrationType) {
   switch (integrationType) {
     case IntegrationType.GMAIL:
       return ["gmail_adapter"];
+    case IntegrationType.GOOGLE_DRIVE:
+      return ["handle_incoming_message"];
+    case IntegrationType.GOOGLE_CALENDAR:
+      return ["check_calendar", "book_call"];
+    case IntegrationType.GOOGLE_SHEETS:
+      return ["check_availability", "book_call"];
     case IntegrationType.INSTAGRAM:
       return ["instagram_adapter"];
     default:
@@ -215,8 +231,9 @@ async function getJson<T>(url: string) {
   return (await response.json()) as T;
 }
 
-async function createGmailCredential(input: {
+async function createGoogleCredential(input: {
   tenantSlug: string;
+  integrationType: IntegrationType;
   email: string;
   tokens: {
     access_token: string;
@@ -230,17 +247,33 @@ async function createGmailCredential(input: {
     return null;
   }
 
-  const credentialName = `${input.tenantSlug} :: Gmail :: ${input.email}`;
+  const credentialType =
+    input.integrationType === IntegrationType.GMAIL
+      ? "gmailOAuth2"
+      : input.integrationType === IntegrationType.GOOGLE_CALENDAR
+        ? "googleCalendarOAuth2Api"
+        : input.integrationType === IntegrationType.GOOGLE_SHEETS
+          ? "googleSheetsOAuth2Api"
+          : "googleDriveOAuth2Api";
+  const credentialName = `${input.tenantSlug} :: ${getIntegrationLabel(input.integrationType)} :: ${input.email}`;
   const expiresIn = input.tokens.expires_in ?? 3600;
+  const nodesAccess =
+    input.integrationType === IntegrationType.GMAIL
+      ? [
+          { nodeType: "n8n-nodes-base.gmailTrigger", nodeTypeVersion: 1 },
+          { nodeType: "n8n-nodes-base.gmail", nodeTypeVersion: 2 }
+        ]
+      : input.integrationType === IntegrationType.GOOGLE_CALENDAR
+        ? [{ nodeType: "n8n-nodes-base.googleCalendar" }]
+        : input.integrationType === IntegrationType.GOOGLE_SHEETS
+          ? [{ nodeType: "n8n-nodes-base.googleSheets" }]
+          : [{ nodeType: "n8n-nodes-base.googleDrive" }];
 
   try {
     const credential = await createN8nCredential({
       name: credentialName,
-      type: "gmailOAuth2",
-      nodesAccess: [
-        { nodeType: "n8n-nodes-base.gmailTrigger", nodeTypeVersion: 1 },
-        { nodeType: "n8n-nodes-base.gmail", nodeTypeVersion: 2 }
-      ],
+      type: credentialType,
+      nodesAccess,
       data: {
         clientId: env.GOOGLE_CLIENT_ID,
         clientSecret: env.GOOGLE_CLIENT_SECRET,
@@ -259,13 +292,16 @@ async function createGmailCredential(input: {
       }
     });
 
-    return `gmailOAuth2:${credential.data.id}:${credentialName}`;
+    return `${credentialType}:${credential.data.id}:${credentialName}`;
   } catch {
     return null;
   }
 }
 
-async function connectGmail(state: OAuthStatePayload, code: string): Promise<OAuthConnectResult> {
+async function connectGoogleWorkspace(
+  state: OAuthStatePayload,
+  code: string
+): Promise<OAuthConnectResult> {
   const token = await postForm<{
     access_token: string;
     refresh_token?: string;
@@ -284,19 +320,41 @@ async function connectGmail(state: OAuthStatePayload, code: string): Promise<OAu
     `https://www.googleapis.com/oauth2/v2/userinfo?access_token=${encodeURIComponent(token.access_token)}`
   );
   const accountLabel = profile.email || profile.name || "Connected Gmail";
-  const credentialRef =
-    (await createGmailCredential({
-      tenantSlug: state.tenantSlug,
-      email: profile.email,
-      tokens: token
-    })) ?? `gmailOAuth2:oauth:${profile.email}`;
+  const connectedAt = new Date();
+  const googleIntegrationTypes = [
+    IntegrationType.GMAIL,
+    IntegrationType.GOOGLE_CALENDAR,
+    IntegrationType.GOOGLE_SHEETS,
+    IntegrationType.GOOGLE_DRIVE
+  ];
+  const credentialRefs = await Promise.all(
+    googleIntegrationTypes.map(async (integrationType) => ({
+      integrationType,
+      credentialRef:
+        (await createGoogleCredential({
+          tenantSlug: state.tenantSlug,
+          integrationType,
+          email: profile.email,
+          tokens: token
+        })) ??
+        `${integrationType === IntegrationType.GMAIL
+          ? "gmailOAuth2"
+          : integrationType === IntegrationType.GOOGLE_CALENDAR
+            ? "googleCalendarOAuth2Api"
+            : integrationType === IntegrationType.GOOGLE_SHEETS
+              ? "googleSheetsOAuth2Api"
+              : "googleDriveOAuth2Api"}:${profile.email}`
+    }))
+  );
 
   return {
-    integrationType: IntegrationType.GMAIL,
-    status: RecordStatus.ACTIVE,
-    accountLabel,
-    credentialRef,
-    connectedAt: new Date()
+    integrations: credentialRefs.map((item) => ({
+      integrationType: item.integrationType,
+      status: RecordStatus.ACTIVE,
+      accountLabel,
+      credentialRef: item.credentialRef,
+      connectedAt
+    }))
   };
 }
 
@@ -348,11 +406,15 @@ async function connectInstagram(state: OAuthStatePayload, code: string): Promise
     linkedInstagram?.instagram_business_account?.id ?? linkedInstagram?.id ?? "instagram";
 
   return {
-    integrationType: IntegrationType.INSTAGRAM,
-    status: RecordStatus.ACTIVE,
-    accountLabel,
-    credentialRef: `facebookGraphApi:${accountId}:${accountLabel}`,
-    connectedAt: new Date()
+    integrations: [
+      {
+        integrationType: IntegrationType.INSTAGRAM,
+        status: RecordStatus.ACTIVE,
+        accountLabel,
+        credentialRef: `facebookGraphApi:${accountId}:${accountLabel}`,
+        connectedAt: new Date()
+      }
+    ]
   };
 }
 
@@ -363,7 +425,7 @@ export async function finalizeOAuthConnection(input: {
 }) {
   const result =
     input.provider === "google"
-      ? await connectGmail(input.state, input.code)
+      ? await connectGoogleWorkspace(input.state, input.code)
       : await connectInstagram(input.state, input.code);
 
   const tenant = await db.tenant.findUnique({
@@ -374,28 +436,32 @@ export async function finalizeOAuthConnection(input: {
     throw new Error("Tenant not found.");
   }
 
-  const integration = await db.integration.upsert({
-    where: {
-      tenantId_type: {
-        tenantId: tenant.id,
-        type: result.integrationType
-      }
-    },
-    update: {
-      status: result.status,
-      accountLabel: result.accountLabel,
-      credentialRef: result.credentialRef,
-      connectedAt: result.connectedAt
-    },
-    create: {
-      tenantId: tenant.id,
-      type: result.integrationType,
-      status: result.status,
-      accountLabel: result.accountLabel,
-      credentialRef: result.credentialRef,
-      connectedAt: result.connectedAt
-    }
-  });
+  const integrations = await Promise.all(
+    result.integrations.map((resolvedIntegration) =>
+      db.integration.upsert({
+        where: {
+          tenantId_type: {
+            tenantId: tenant.id,
+            type: resolvedIntegration.integrationType
+          }
+        },
+        update: {
+          status: resolvedIntegration.status,
+          accountLabel: resolvedIntegration.accountLabel,
+          credentialRef: resolvedIntegration.credentialRef,
+          connectedAt: resolvedIntegration.connectedAt
+        },
+        create: {
+          tenantId: tenant.id,
+          type: resolvedIntegration.integrationType,
+          status: resolvedIntegration.status,
+          accountLabel: resolvedIntegration.accountLabel,
+          credentialRef: resolvedIntegration.credentialRef,
+          connectedAt: resolvedIntegration.connectedAt
+        }
+      })
+    )
+  );
 
   const agents = await db.agent.findMany({
     where: {
@@ -406,7 +472,13 @@ export async function finalizeOAuthConnection(input: {
     }
   });
 
-  const workflowKeys = getWorkflowKeysForIntegration(result.integrationType);
+  const workflowKeys = Array.from(
+    new Set(
+      result.integrations.flatMap((resolvedIntegration) =>
+        getWorkflowKeysForIntegration(resolvedIntegration.integrationType)
+      )
+    )
+  );
 
   if (workflowKeys.length > 0) {
     await Promise.all(
@@ -419,5 +491,14 @@ export async function finalizeOAuthConnection(input: {
     );
   }
 
-  return { integration, redirectTo: input.state.redirectTo };
+  const primaryIntegration =
+    integrations.find(
+      (integration) => integration.type === input.state.integrationType
+    ) ?? integrations[0];
+
+  return {
+    integration: primaryIntegration,
+    integrations,
+    redirectTo: input.state.redirectTo
+  };
 }
